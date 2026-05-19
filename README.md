@@ -8,13 +8,13 @@ GripSim is a browserbased integrated development environment (IDE) designed for 
 
 The application is implemented as a singlepage React application comprising four principal panels:
 
-1. **Webcam and Hand Tracking Panel** — Realtime video capture with MediaPipe Hands overlay, finger state extraction with temporal smoothing, gesture classification, and emergency stop detection.
+1. **Webcam and Hand Tracking Panel** Realtime video capture with MediaPipe Hands overlay, finger state extraction with temporal smoothing, gesture classification, and emergency stop detection.
 
-2. **Circuit Builder** — An interactive SVGbased schematic editor supporting draganddrop component placement, pintopin wiring with automatic colour coding, circuit validation, and reference circuit loading.
+2. **Circuit Builder** An interactive SVGbased schematic editor supporting draganddrop component placement, pintopin wiring with automatic colour coding, circuit validation, and reference circuit loading.
 
-3. **Servo Visualiser and Serial Monitor** — Animated semicircular gauge displays for gripper and rotation servo angles, an animated gripper claw SVG, and a colourcoded serial monitor emulating Arduino IDE output.
+3. **Servo Visualiser and Serial Monitor** Animated semicircular gauge displays for gripper and rotation servo angles, an animated gripper claw SVG, and a colourcoded serial monitor emulating Arduino IDE output.
 
-4. **Code Editor** — Monaco Editor integration providing syntaxhighlighted, editable reference code for both the Python control script and the Arduino firmware.
+4. **Code Editor** Monaco Editor integration providing syntaxhighlighted, editable reference code for both the Python control script and the Arduino firmware.
 
 ## Technical Stack
 
