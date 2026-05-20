@@ -206,9 +206,10 @@ export default function useMediaPipe() {
       addSerialLog('Loading MediaPipe Tasks Vision...', 'info');
 
       let handLandmarker;
+      const hadDefine = 'define' in window;
       const savedDefine = window.define;
       try {
-        window.define = undefined;
+        delete window.define;
         const vision = await FilesetResolver.forVisionTasks(
           'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm'
         );
@@ -228,7 +229,7 @@ export default function useMediaPipe() {
         addSerialLog(`ERROR: Failed to load hand landmarker — ${err.message}`, 'error');
         return;
       } finally {
-        if (typeof savedDefine !== 'undefined') window.define = savedDefine;
+        if (hadDefine) window.define = savedDefine;
       }
 
       if (cancelled) {
@@ -389,7 +390,7 @@ export default function useMediaPipe() {
       addSerialLog('MediaPipe Hand Landmarker initialized — webcam active', 'info');
     }
 
-    init();
+    init().catch((err) => addSerialLog(`ERROR: init failed — ${err.message}`, 'error'));
 
     return () => {
       cancelled = true;

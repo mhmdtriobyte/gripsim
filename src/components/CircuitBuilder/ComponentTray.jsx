@@ -9,11 +9,11 @@ const COMPONENT_TYPES = [
     height: 140,
   },
   {
-    type: 'servo',
-    label: 'SG90 Servo',
+    type: 'robotic-arm',
+    label: 'Robotic Arm',
     color: '#3a3a3a',
-    width: 80,
-    height: 90,
+    width: 150,
+    height: 320,
   },
   {
     type: 'power',
@@ -26,8 +26,8 @@ const COMPONENT_TYPES = [
     type: 'breadboard',
     label: 'Breadboard',
     color: '#e8e8d8',
-    width: 160,
-    height: 80,
+    width: 260,
+    height: 140,
   },
   {
     type: 'usb',

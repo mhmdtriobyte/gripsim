@@ -48,19 +48,22 @@ export const ARDUINO_PINS = [...DIGITAL_PINS.map(p => ({
   label: p.id,
 }))];
 
-const ArduinoUno = memo(function ArduinoUno({ onPinClick, id }) {
-  const pinColor = (pin) => {
-    if (pin.type === 'power') return '#ff4444';
-    if (pin.type === 'gnd') return '#444';
-    if (pin.type === 'analog') return '#4488ff';
-    return '#daa520';
-  };
+const ArduinoUno = memo(function ArduinoUno({ onPinClick, id, connectedPins }) {
+  const connected = connectedPins || new Set();
 
   return (
     <g>
       <defs>
         <filter id={`shadow-arduino-${id}`} x="-10%" y="-10%" width="120%" height="120%">
           <feDropShadow dx="2" dy="3" stdDeviation="4" floodColor="#003060" floodOpacity="0.6"/>
+        </filter>
+        <filter id={`pin-glow-${id}`} x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur stdDeviation="3" result="blur"/>
+          <feMerge>
+            <feMergeNode in="blur"/>
+            <feMergeNode in="blur"/>
+            <feMergeNode in="SourceGraphic"/>
+          </feMerge>
         </filter>
         <linearGradient id={`pcb-grad-${id}`} x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor="#007C8A"/>
@@ -189,68 +192,110 @@ const ArduinoUno = memo(function ArduinoUno({ onPinClick, id }) {
       <text x="150" y="123" textAnchor="middle" fontSize="3.5" fill="#88B8B0" fontFamily="IBM Plex Mono">POWER</text>
 
       {/* Digital pins */}
-      {DIGITAL_PINS.map((pin) => (
-        <g key={pin.id}>
-          <circle
-            cx={pin.x} cy={pin.y} r="5"
-            fill={pin.pwm ? '#C8A84E' : '#A88830'}
-            stroke="#E8C860" strokeWidth="0.5"
-            style={{ cursor: 'pointer' }}
-            onClick={(e) => { e.stopPropagation(); onPinClick?.(id, pin.id, pin.x, pin.y); }}
-          />
-          <circle cx={pin.x} cy={pin.y} r="2" fill="#222"/>
-          <text
-            x={pin.x} y={pin.y + 16}
-            textAnchor="middle" fontSize="4.5" fill="#88B8B0"
-            fontFamily="IBM Plex Mono"
-          >
-            {pin.pwm ? `~${pin.id.replace('D', '')}` : pin.id.replace('D', '')}
-          </text>
-        </g>
-      ))}
+      {DIGITAL_PINS.map((pin) => {
+        const isConnected = connected.has(pin.id);
+        return (
+          <g key={pin.id}>
+            {isConnected && (
+              <circle
+                cx={pin.x} cy={pin.y} r="9"
+                fill="#00FFF0" opacity="0.15"
+                filter={`url(#pin-glow-${id})`}
+              />
+            )}
+            <circle
+              cx={pin.x} cy={pin.y} r="5"
+              fill={isConnected ? '#00FFF0' : pin.pwm ? '#C8A84E' : '#A88830'}
+              stroke={isConnected ? '#00FFF0' : '#E8C860'}
+              strokeWidth={isConnected ? 1.5 : 0.5}
+              style={{ cursor: 'pointer' }}
+              filter={isConnected ? `url(#pin-glow-${id})` : undefined}
+              onClick={(e) => { e.stopPropagation(); onPinClick?.(id, pin.id, pin.x, pin.y); }}
+            />
+            <circle cx={pin.x} cy={pin.y} r="2" fill={isConnected ? '#005555' : '#222'}/>
+            <text
+              x={pin.x} y={pin.y + 16}
+              textAnchor="middle" fontSize="4.5"
+              fill={isConnected ? '#00FFF0' : '#88B8B0'}
+              fontFamily="IBM Plex Mono"
+              fontWeight={isConnected ? 'bold' : 'normal'}
+            >
+              {pin.pwm ? `~${pin.id.replace('D', '')}` : pin.id.replace('D', '')}
+            </text>
+          </g>
+        );
+      })}
 
       {/* Power pins */}
-      {POWER_PINS.map((pin) => (
-        <g key={pin.id}>
-          <circle
-            cx={pin.x} cy={pin.y} r="5"
-            fill={pin.type === 'gnd' ? '#444' : pin.type === 'power' ? '#cc3333' : '#C8A84E'}
-            stroke={pin.type === 'gnd' ? '#666' : pin.type === 'power' ? '#ff5555' : '#E8C860'}
-            strokeWidth="0.5"
-            style={{ cursor: 'pointer' }}
-            onClick={(e) => { e.stopPropagation(); onPinClick?.(id, pin.id, pin.x, pin.y); }}
-          />
-          <circle cx={pin.x} cy={pin.y} r="2" fill="#222"/>
-          <text
-            x={pin.x} y={pin.y - 10}
-            textAnchor="middle" fontSize="4" fill={pin.type === 'gnd' ? '#999' : '#D09090'}
-            fontFamily="IBM Plex Mono"
-          >
-            {pin.label || pin.id}
-          </text>
-        </g>
-      ))}
+      {POWER_PINS.map((pin) => {
+        const isConnected = connected.has(pin.id);
+        const glowColor = pin.type === 'gnd' ? '#ff8800' : '#ff4444';
+        return (
+          <g key={pin.id}>
+            {isConnected && (
+              <circle
+                cx={pin.x} cy={pin.y} r="9"
+                fill={glowColor} opacity="0.15"
+                filter={`url(#pin-glow-${id})`}
+              />
+            )}
+            <circle
+              cx={pin.x} cy={pin.y} r="5"
+              fill={isConnected ? glowColor : pin.type === 'gnd' ? '#444' : pin.type === 'power' ? '#cc3333' : '#C8A84E'}
+              stroke={isConnected ? glowColor : pin.type === 'gnd' ? '#666' : pin.type === 'power' ? '#ff5555' : '#E8C860'}
+              strokeWidth={isConnected ? 1.5 : 0.5}
+              style={{ cursor: 'pointer' }}
+              filter={isConnected ? `url(#pin-glow-${id})` : undefined}
+              onClick={(e) => { e.stopPropagation(); onPinClick?.(id, pin.id, pin.x, pin.y); }}
+            />
+            <circle cx={pin.x} cy={pin.y} r="2" fill={isConnected ? '#331100' : '#222'}/>
+            <text
+              x={pin.x} y={pin.y - 10}
+              textAnchor="middle" fontSize="4"
+              fill={isConnected ? glowColor : pin.type === 'gnd' ? '#999' : '#D09090'}
+              fontFamily="IBM Plex Mono"
+              fontWeight={isConnected ? 'bold' : 'normal'}
+            >
+              {pin.label || pin.id}
+            </text>
+          </g>
+        );
+      })}
 
       {/* Analog pins */}
-      {ANALOG_PINS.map((pin) => (
-        <g key={pin.id}>
-          <circle
-            cx={pin.x} cy={pin.y} r="5"
-            fill="#3366cc"
-            stroke="#5588ee" strokeWidth="0.5"
-            style={{ cursor: 'pointer' }}
-            onClick={(e) => { e.stopPropagation(); onPinClick?.(id, pin.id, pin.x, pin.y); }}
-          />
-          <circle cx={pin.x} cy={pin.y} r="2" fill="#222"/>
-          <text
-            x={pin.x} y={pin.y - 10}
-            textAnchor="middle" fontSize="4" fill="#88aaff"
-            fontFamily="IBM Plex Mono"
-          >
-            {pin.id}
-          </text>
-        </g>
-      ))}
+      {ANALOG_PINS.map((pin) => {
+        const isConnected = connected.has(pin.id);
+        return (
+          <g key={pin.id}>
+            {isConnected && (
+              <circle
+                cx={pin.x} cy={pin.y} r="9"
+                fill="#4488ff" opacity="0.15"
+                filter={`url(#pin-glow-${id})`}
+              />
+            )}
+            <circle
+              cx={pin.x} cy={pin.y} r="5"
+              fill={isConnected ? '#4488ff' : '#3366cc'}
+              stroke={isConnected ? '#66aaff' : '#5588ee'}
+              strokeWidth={isConnected ? 1.5 : 0.5}
+              style={{ cursor: 'pointer' }}
+              filter={isConnected ? `url(#pin-glow-${id})` : undefined}
+              onClick={(e) => { e.stopPropagation(); onPinClick?.(id, pin.id, pin.x, pin.y); }}
+            />
+            <circle cx={pin.x} cy={pin.y} r="2" fill={isConnected ? '#112244' : '#222'}/>
+            <text
+              x={pin.x} y={pin.y - 10}
+              textAnchor="middle" fontSize="4"
+              fill={isConnected ? '#66aaff' : '#88aaff'}
+              fontFamily="IBM Plex Mono"
+              fontWeight={isConnected ? 'bold' : 'normal'}
+            >
+              {pin.id}
+            </text>
+          </g>
+        );
+      })}
     </g>
   );
 });

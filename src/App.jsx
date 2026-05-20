@@ -1,32 +1,25 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, lazy, Suspense } from 'react';
 import { GripSimProvider } from './context/GripSimContext';
 import Header from './components/Header';
 import WebcamPanel from './components/WebcamPanel';
 import CircuitCanvas from './components/CircuitBuilder/CircuitCanvas';
-import ServoVisualizer from './components/ServoVisualizer/ServoVisualizer';
-import CodePanel from './components/CodeEditor/CodePanel';
 import ResizeDivider from './components/ResizeDivider';
 import useMediaPipe from './hooks/useMediaPipe';
 import { useGripSim } from './context/GripSimContext';
+
+const CodePanel = lazy(() => import('./components/CodeEditor/CodePanel'));
 
 
 function AppContent() {
   useMediaPipe();
   const containerRef = useRef(null);
   const [webcamWidth, setWebcamWidth] = useState(280);
-  const [servoWidth, setServoWidth] = useState(320);
   const [codeHeight, setCodeHeight] = useState(280);
 
   const handleWebcamResize = useCallback((clientX) => {
     if (!containerRef.current) return;
     const rect = containerRef.current.getBoundingClientRect();
     setWebcamWidth(Math.max(200, Math.min(500, clientX - rect.left)));
-  }, []);
-
-  const handleServoResize = useCallback((clientX) => {
-    if (!containerRef.current) return;
-    const rect = containerRef.current.getBoundingClientRect();
-    setServoWidth(Math.max(250, Math.min(500, rect.right - clientX)));
   }, []);
 
   const handleCodeResize = useCallback((clientY) => {
@@ -47,14 +40,16 @@ function AppContent() {
           <div className="flex-1 p-2 min-w-0">
             <CircuitCanvas />
           </div>
-          <ResizeDivider direction="horizontal" onResize={handleServoResize} />
-          <div style={{ width: servoWidth, minWidth: 250, flexShrink: 0 }} className="p-2">
-            <ServoVisualizer />
-          </div>
         </div>
         <ResizeDivider direction="vertical" onResize={handleCodeResize} />
         <div style={{ height: codeHeight, minHeight: 150, flexShrink: 0 }} className="p-2 pt-0">
-          <CodePanel />
+          <Suspense fallback={
+            <div className="panel h-full flex items-center justify-center">
+              <span className="font-mono text-xs text-[var(--text-dim)]">Loading editor...</span>
+            </div>
+          }>
+            <CodePanel />
+          </Suspense>
         </div>
       </div>
     </div>

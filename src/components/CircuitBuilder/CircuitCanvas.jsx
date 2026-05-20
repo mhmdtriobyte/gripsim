@@ -1,11 +1,11 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useGripSim } from '../../context/GripSimContext';
 import ComponentTray from './ComponentTray';
 import WireLayer from './WireLayer';
 import ValidationPanel from './ValidationPanel';
 import HandOverlay from './HandOverlay';
 import ArduinoUno, { ARDUINO_PINS } from './components/ArduinoUno';
-import ServoSG90, { SERVO_PINS } from './components/ServoSG90';
+import RoboticArm, { ROBOTIC_ARM_PINS } from './components/ServoSG90';
 import PowerSupply, { POWER_SUPPLY_PINS } from './components/PowerSupply';
 import Breadboard, { BREADBOARD_PINS } from './components/Breadboard';
 import USBCable from './components/USBCable';
@@ -15,7 +15,7 @@ const snap = (v) => Math.round(v / GRID_SIZE) * GRID_SIZE;
 
 const PIN_DEFS = {
   arduino: ARDUINO_PINS,
-  servo: SERVO_PINS,
+  'robotic-arm': ROBOTIC_ARM_PINS,
   power: POWER_SUPPLY_PINS,
   breadboard: BREADBOARD_PINS,
 };
@@ -32,13 +32,13 @@ let nextId = 1;
 
 const COMPONENT_MAP = {
   arduino: ArduinoUno,
-  servo: ServoSG90,
+  'robotic-arm': RoboticArm,
   power: PowerSupply,
   breadboard: Breadboard,
   usb: USBCable,
 };
 
-const COMP_LABELS = { arduino: 'Arduino Uno', servo: 'SG90 Servo', power: 'Power Supply', breadboard: 'Breadboard', usb: 'USB Cable' };
+const COMP_LABELS = { arduino: 'Arduino Uno', 'robotic-arm': 'Robotic Arm', power: 'Power Supply', breadboard: 'Breadboard', usb: 'USB Cable' };
 
 const CircuitCanvas = memo(function CircuitCanvas() {
   const { state, dispatch } = useGripSim();
@@ -222,8 +222,8 @@ const CircuitCanvas = memo(function CircuitCanvas() {
     const arduino = components.find((c) => c.type === 'arduino');
     report.push({ label: 'Arduino placed', pass: !!arduino });
 
-    const servos = components.filter((c) => c.type === 'servo');
-    report.push({ label: 'At least one servo placed', pass: servos.length > 0 });
+    const arms = components.filter((c) => c.type === 'robotic-arm');
+    report.push({ label: 'Robotic arm placed', pass: arms.length > 0 });
 
     const findWireForPin = (compId, pinId) =>
       wires.find(
@@ -237,7 +237,17 @@ const CircuitCanvas = memo(function CircuitCanvas() {
         ? { cid: wire.targetComponentId, pid: wire.targetPinId }
         : { cid: wire.sourceComponentId, pid: wire.sourcePinId };
 
-    const canReachPin = (startCompId, startPinId, targetPinIds) => {
+    const isPowerPin = (pid) =>
+      pid === '5V' || pid === '+5V' || pid === '3.3V' ||
+      pid === 'PWR+' || pid.startsWith('PWR_T+') || pid.startsWith('PWR_B+');
+
+    const isGndPin = (pid) =>
+      pid === 'GND' || pid === 'GND1' || pid === 'GND2' ||
+      pid === 'PWR-' || pid.startsWith('PWR_T-') || pid.startsWith('PWR_B-');
+
+    const pwmPins = ['D3', 'D5', 'D6', 'D9', 'D10', 'D11'];
+
+    const canReachPin = (startCompId, startPinId, testFn) => {
       const visited = new Set();
       const queue = [{ compId: startCompId, pinId: startPinId }];
       while (queue.length > 0) {
@@ -245,9 +255,7 @@ const CircuitCanvas = memo(function CircuitCanvas() {
         const key = `${compId}:${pinId}`;
         if (visited.has(key)) continue;
         visited.add(key);
-        if (targetPinIds.some((t) => t.pid === pinId || (t.cid && components.find((c) => c.id === compId)?.type === 'breadboard' && isBusMatch(pinId, t)))) {
-          return true;
-        }
+        if (testFn(pinId)) return true;
         const connectedWires = wires.filter(
           (w) =>
             (w.sourceComponentId === compId && w.sourcePinId === pinId) ||
@@ -255,53 +263,51 @@ const CircuitCanvas = memo(function CircuitCanvas() {
         );
         for (const w of connectedWires) {
           const other = getOtherEnd(w, compId);
-          const otherComp = components.find((c) => c.id === other.cid);
-          if (otherComp?.type === 'breadboard') {
-            const busPins = other.pid === 'PWR+' ? ['PWR+'] : other.pid === 'PWR-' ? ['PWR-'] : [];
-            for (const bp of busPins) {
-              queue.push({ compId: other.cid, pinId: bp });
-            }
-          }
-          if (targetPinIds.some((t) => t.pid === other.pid)) return true;
+          if (testFn(other.pid)) return true;
           queue.push({ compId: other.cid, pinId: other.pid });
         }
       }
       return false;
     };
 
-    const isBusMatch = () => false;
+    // Validate each robotic arm (has 2 servo channels: 1=rotation, 2=gripper)
+    arms.forEach((arm, ai) => {
+      const servoChannels = [
+        { suffix: '1', label: 'Rotation' },
+        { suffix: '2', label: 'Gripper' },
+      ];
 
-    servos.forEach((servo, i) => {
-      const vccWire = findWireForPin(servo.id, 'VCC');
-      const otherEnd = vccWire ? getOtherEnd(vccWire, servo.id) : null;
-      const vccOk =
-        otherEnd &&
-        (otherEnd.pid === '5V' || otherEnd.pid === '+5V' || otherEnd.pid === 'PWR+');
-      if (vccWire && !vccOk) failedWireIds.push(vccWire.id);
-      report.push({
-        label: `Servo ${i + 1} VCC → 5V`,
-        pass: !!vccOk,
-      });
+      servoChannels.forEach(({ suffix, label }) => {
+        const vccPin = `VCC${suffix}`;
+        const gndPin = `GND${suffix}`;
+        const sigPin = `SIG${suffix}`;
 
-      const gndWire = findWireForPin(servo.id, 'GND');
-      const gndEnd = gndWire ? getOtherEnd(gndWire, servo.id) : null;
-      const gndOk =
-        gndEnd &&
-        (gndEnd.pid === 'GND' ||
-          gndEnd.pid === 'GND1' ||
-          gndEnd.pid === 'GND2' ||
-          gndEnd.pid === 'PWR-');
-      if (gndWire && !gndOk) failedWireIds.push(gndWire.id);
-      report.push({ label: `Servo ${i + 1} GND → GND`, pass: !!gndOk });
+        // VCC check
+        const vccWire = findWireForPin(arm.id, vccPin);
+        const vccEnd = vccWire ? getOtherEnd(vccWire, arm.id) : null;
+        let vccOk = vccEnd && isPowerPin(vccEnd.pid);
+        if (!vccOk && vccWire) {
+          vccOk = canReachPin(arm.id, vccPin, isPowerPin);
+        }
+        if (vccWire && !vccOk) failedWireIds.push(vccWire.id);
+        report.push({ label: `${label} VCC → 5V`, pass: !!vccOk });
 
-      const sigWire = findWireForPin(servo.id, 'Signal');
-      const sigEnd = sigWire ? getOtherEnd(sigWire, servo.id) : null;
-      const pwmPins = ['D3', 'D5', 'D6', 'D9', 'D10', 'D11'];
-      const sigOk = sigEnd && pwmPins.includes(sigEnd.pid);
-      if (sigWire && !sigOk) failedWireIds.push(sigWire.id);
-      report.push({
-        label: `Servo ${i + 1} Signal → PWM pin`,
-        pass: !!sigOk,
+        // GND check
+        const gndWire = findWireForPin(arm.id, gndPin);
+        const gndEnd = gndWire ? getOtherEnd(gndWire, arm.id) : null;
+        let gndOk = gndEnd && isGndPin(gndEnd.pid);
+        if (!gndOk && gndWire) {
+          gndOk = canReachPin(arm.id, gndPin, isGndPin);
+        }
+        if (gndWire && !gndOk) failedWireIds.push(gndWire.id);
+        report.push({ label: `${label} GND → GND`, pass: !!gndOk });
+
+        // Signal check
+        const sigWire = findWireForPin(arm.id, sigPin);
+        const sigEnd = sigWire ? getOtherEnd(sigWire, arm.id) : null;
+        const sigOk = sigEnd && pwmPins.includes(sigEnd.pid);
+        if (sigWire && !sigOk) failedWireIds.push(sigWire.id);
+        report.push({ label: `${label} Signal → PWM pin`, pass: !!sigOk });
       });
     });
 
@@ -329,31 +335,6 @@ const CircuitCanvas = memo(function CircuitCanvas() {
       report.push({ label: 'Common ground (PSU ↔ Arduino)', pass: commonGnd });
     }
 
-    // Breadboard bus validation: check if servo pins reach power through breadboard
-    const breadboard = components.find((c) => c.type === 'breadboard');
-    if (breadboard) {
-      servos.forEach((servo, i) => {
-        const vccReport = report.find((r) => r.label === `Servo ${i + 1} VCC → 5V`);
-        if (vccReport && !vccReport.pass) {
-          const reachable = canReachPin(servo.id, 'VCC', [{ pid: '5V' }, { pid: '+5V' }]);
-          if (reachable) {
-            vccReport.pass = true;
-            const idx = failedWireIds.indexOf(findWireForPin(servo.id, 'VCC')?.id);
-            if (idx !== -1) failedWireIds.splice(idx, 1);
-          }
-        }
-        const gndReport = report.find((r) => r.label === `Servo ${i + 1} GND → GND`);
-        if (gndReport && !gndReport.pass) {
-          const reachable = canReachPin(servo.id, 'GND', [{ pid: 'GND' }, { pid: 'GND1' }, { pid: 'GND2' }]);
-          if (reachable) {
-            gndReport.pass = true;
-            const idx = failedWireIds.indexOf(findWireForPin(servo.id, 'GND')?.id);
-            if (idx !== -1) failedWireIds.splice(idx, 1);
-          }
-        }
-      });
-    }
-
     const valid = report.every((r) => r.pass);
     dispatch({
       type: 'SET_VALIDATION_REPORT',
@@ -365,10 +346,10 @@ const CircuitCanvas = memo(function CircuitCanvas() {
 
   const handleLoadReference = useCallback(() => {
     const refComponents = [
-      { id: 'ref-arduino', type: 'arduino', x: 200, y: 100, width: 240, height: 140 },
-      { id: 'ref-servo1', type: 'servo', x: 100, y: 300, width: 80, height: 90 },
-      { id: 'ref-servo2', type: 'servo', x: 300, y: 300, width: 80, height: 90 },
-      { id: 'ref-power', type: 'power', x: 500, y: 150, width: 100, height: 70 },
+      { id: 'ref-arduino', type: 'arduino', x: 60, y: 40, width: 240, height: 140 },
+      { id: 'ref-arm', type: 'robotic-arm', x: 700, y: 20, width: 150, height: 320 },
+      { id: 'ref-bb', type: 'breadboard', x: 120, y: 320, width: 260, height: 140 },
+      { id: 'ref-power', type: 'power', x: 500, y: 360, width: 100, height: 70 },
     ];
     const compMap = Object.fromEntries(refComponents.map((c) => [c.id, c]));
     const makeWire = (id, srcId, srcPin, tgtId, tgtPin) => {
@@ -377,13 +358,26 @@ const CircuitCanvas = memo(function CircuitCanvas() {
       return { id, sourceComponentId: srcId, sourcePinId: srcPin, sourceX: src.x, sourceY: src.y, targetComponentId: tgtId, targetPinId: tgtPin, targetX: tgt.x, targetY: tgt.y };
     };
     const refWires = [
-      makeWire('ref-w1', 'ref-servo1', 'Signal', 'ref-arduino', 'D3'),
-      makeWire('ref-w2', 'ref-servo2', 'Signal', 'ref-arduino', 'D5'),
-      makeWire('ref-w3', 'ref-servo1', 'VCC', 'ref-power', '+5V'),
-      makeWire('ref-w4', 'ref-servo2', 'VCC', 'ref-power', '+5V'),
-      makeWire('ref-w5', 'ref-servo1', 'GND', 'ref-arduino', 'GND1'),
-      makeWire('ref-w6', 'ref-servo2', 'GND', 'ref-arduino', 'GND2'),
-      makeWire('ref-w7', 'ref-power', 'GND', 'ref-arduino', 'GND1'),
+      // Rotation servo signal -> Arduino D5 (maps to rotationAngle)
+      makeWire('ref-w1', 'ref-arm', 'SIG1', 'ref-arduino', 'D5'),
+      // Gripper servo signal -> Arduino D3 (maps to gripperAngle)
+      makeWire('ref-w2', 'ref-arm', 'SIG2', 'ref-arduino', 'D3'),
+      // Power: PSU +5V -> breadboard power rail
+      makeWire('ref-w3', 'ref-power', '+5V', 'ref-bb', 'PWR_T+'),
+      // Power: PSU GND -> breadboard GND rail
+      makeWire('ref-w4', 'ref-power', 'GND', 'ref-bb', 'PWR_T-'),
+      // Arm VCC1 -> breadboard power
+      makeWire('ref-w5', 'ref-arm', 'VCC1', 'ref-bb', 'PWR_T+_R'),
+      // Arm GND1 -> breadboard GND
+      makeWire('ref-w6', 'ref-arm', 'GND1', 'ref-bb', 'PWR_T-_R'),
+      // Arm VCC2 -> breadboard power
+      makeWire('ref-w7', 'ref-arm', 'VCC2', 'ref-bb', 'PWR_B+'),
+      // Arm GND2 -> breadboard GND
+      makeWire('ref-w8', 'ref-arm', 'GND2', 'ref-bb', 'PWR_B-'),
+      // Common ground: Arduino GND -> breadboard GND
+      makeWire('ref-w9', 'ref-arduino', 'GND1', 'ref-bb', 'PWR_B-_R'),
+      // Common ground: PSU GND -> Arduino GND (direct link for validation)
+      makeWire('ref-w10', 'ref-power', 'GND', 'ref-arduino', 'GND2'),
     ];
     dispatch({ type: 'SET_COMPONENTS', payload: refComponents });
     dispatch({ type: 'SET_WIRES', payload: refWires });
@@ -440,15 +434,38 @@ const CircuitCanvas = memo(function CircuitCanvas() {
     );
 
     const clickedWire = !clickedComp ? state.wires.find((w) => {
-      const steps = 10;
-      for (let t = 0; t <= 1; t += 1 / steps) {
-        const u = 1 - t;
-        const dx = w.targetX - w.sourceX;
-        const cx1 = w.sourceX + dx * 0.4;
-        const cx2 = w.targetX - dx * 0.4;
-        const bx = u * u * u * w.sourceX + 3 * u * u * t * cx1 + 3 * u * t * t * cx2 + t * t * t * w.targetX;
-        const by = u * u * u * w.sourceY + 3 * u * u * t * w.sourceY + 3 * u * t * t * w.targetY + t * t * t * w.targetY;
-        if (Math.abs(pt.x - bx) < 12 && Math.abs(pt.y - by) < 12) return true;
+      // Resolve pin positions for orthogonal hit test
+      const comp1 = state.components.find((c) => c.id === w.sourceComponentId);
+      const comp2 = state.components.find((c) => c.id === w.targetComponentId);
+      const pins1 = comp1 ? PIN_DEFS[comp1.type] : null;
+      const pins2 = comp2 ? PIN_DEFS[comp2.type] : null;
+      const p1 = pins1?.find((p) => p.id === w.sourcePinId);
+      const p2 = pins2?.find((p) => p.id === w.targetPinId);
+      const sx = comp1 ? comp1.x + (p1?.x ?? 0) : w.sourceX;
+      const sy = comp1 ? comp1.y + (p1?.y ?? 0) : w.sourceY;
+      const tx = comp2 ? comp2.x + (p2?.x ?? 0) : w.targetX;
+      const ty = comp2 ? comp2.y + (p2?.y ?? 0) : w.targetY;
+      // Check proximity to orthogonal segments
+      const dy = ty - sy;
+      const dx2 = tx - sx;
+      const thr = 12;
+      const vertFirst = Math.abs(dy) > Math.abs(dx2);
+      if (Math.abs(dy) < 8) {
+        const midX = sx + dx2 / 2;
+        // 3 segments: horizontal, vertical, horizontal
+        if (Math.abs(pt.y - sy) < thr && pt.x >= Math.min(sx, midX) - thr && pt.x <= Math.max(sx, midX) + thr) return true;
+        if (Math.abs(pt.x - midX) < thr && pt.y >= Math.min(sy, ty) - thr && pt.y <= Math.max(sy, ty) + thr) return true;
+        if (Math.abs(pt.y - ty) < thr && pt.x >= Math.min(midX, tx) - thr && pt.x <= Math.max(midX, tx) + thr) return true;
+      } else if (vertFirst) {
+        const midY = sy + dy * 0.4;
+        if (Math.abs(pt.x - sx) < thr && pt.y >= Math.min(sy, midY) - thr && pt.y <= Math.max(sy, midY) + thr) return true;
+        if (Math.abs(pt.y - midY) < thr && pt.x >= Math.min(sx, tx) - thr && pt.x <= Math.max(sx, tx) + thr) return true;
+        if (Math.abs(pt.x - tx) < thr && pt.y >= Math.min(midY, ty) - thr && pt.y <= Math.max(midY, ty) + thr) return true;
+      } else {
+        const midX = sx + dx2 * 0.4;
+        if (Math.abs(pt.y - sy) < thr && pt.x >= Math.min(sx, midX) - thr && pt.x <= Math.max(sx, midX) + thr) return true;
+        if (Math.abs(pt.x - midX) < thr && pt.y >= Math.min(sy, ty) - thr && pt.y <= Math.max(sy, ty) + thr) return true;
+        if (Math.abs(pt.y - ty) < thr && pt.x >= Math.min(midX, tx) - thr && pt.x <= Math.max(midX, tx) + thr) return true;
       }
       return false;
     }) : null;
@@ -545,17 +562,7 @@ const CircuitCanvas = memo(function CircuitCanvas() {
     }
   }, [ctxMenu, state.wires, dispatch, handleLoadReference, handleValidate]);
 
-  const getServoAngle = useCallback((servoId) => {
-    const sigWire = state.wires.find(
-      (w) =>
-        (w.sourceComponentId === servoId && w.sourcePinId === 'Signal') ||
-        (w.targetComponentId === servoId && w.targetPinId === 'Signal')
-    );
-    if (!sigWire) return state.gripperAngle;
-    const pin = sigWire.sourceComponentId === servoId ? sigWire.targetPinId : sigWire.sourcePinId;
-    if (pin === 'D5') return state.rotationAngle;
-    return state.gripperAngle;
-  }, [state.wires, state.gripperAngle, state.rotationAngle]);
+  // No longer needed - robotic arm gets both angles directly
 
   const isActive = state.activePanel === 'circuit';
 
@@ -603,32 +610,53 @@ const CircuitCanvas = memo(function CircuitCanvas() {
             style={{ cursor: isPanning ? 'grabbing' : wireStart ? 'crosshair' : 'default' }}
           >
             <g transform={`translate(${panX},${panY}) scale(${zoom})`}>
-              <WireLayer
-                wires={state.wires}
-                components={state.components}
-                selectedId={selectedId}
-                onSelect={setSelectedId}
-                failedWireIds={state.failedWireIds}
-              />
 
-              {wireStart && mousePos && (
-                <line
-                  x1={wireStart.x}
-                  y1={wireStart.y}
-                  x2={mousePos.x}
-                  y2={mousePos.y}
-                  stroke="var(--accent-cyan)"
-                  strokeWidth="2"
-                  strokeDasharray="6 3"
-                  className="wire-animated"
-                  pointerEvents="none"
-                />
-              )}
+              {wireStart && mousePos && (() => {
+                const sx = wireStart.x, sy = wireStart.y;
+                const tx = mousePos.x, ty = mousePos.y;
+                const dy = ty - sy, dx = tx - sx;
+                let d;
+                if (Math.abs(dy) < 8) {
+                  const midX = sx + dx / 2;
+                  d = `M ${sx} ${sy} L ${midX} ${sy} L ${midX} ${ty} L ${tx} ${ty}`;
+                } else if (Math.abs(dy) > Math.abs(dx)) {
+                  const midY = sy + dy * 0.4;
+                  d = `M ${sx} ${sy} L ${sx} ${midY} L ${tx} ${midY} L ${tx} ${ty}`;
+                } else {
+                  const midX = sx + dx * 0.4;
+                  d = `M ${sx} ${sy} L ${midX} ${sy} L ${midX} ${ty} L ${tx} ${ty}`;
+                }
+                return (
+                  <path
+                    d={d}
+                    fill="none"
+                    stroke="var(--accent-cyan)"
+                    strokeWidth="2"
+                    strokeDasharray="6 3"
+                    strokeLinejoin="round"
+                    className="wire-animated"
+                    pointerEvents="none"
+                  />
+                );
+              })()}
 
               {state.components.map((comp) => {
                 const Component = COMPONENT_MAP[comp.type];
                 if (!Component) return null;
                 const isSelected = selectedId === comp.id;
+                const extraProps = {};
+                if (comp.type === 'robotic-arm') {
+                  extraProps.gripperAngle = state.gripperAngle;
+                  extraProps.rotationAngle = state.rotationAngle;
+                }
+                if (comp.type === 'arduino') {
+                  const pins = new Set();
+                  for (const w of state.wires) {
+                    if (w.sourceComponentId === comp.id) pins.add(w.sourcePinId);
+                    if (w.targetComponentId === comp.id) pins.add(w.targetPinId);
+                  }
+                  extraProps.connectedPins = pins;
+                }
                 return (
                   <g
                     key={comp.id}
@@ -653,11 +681,19 @@ const CircuitCanvas = memo(function CircuitCanvas() {
                     <Component
                       id={comp.id}
                       onPinClick={handlePinClick}
-                      angle={comp.type === 'servo' ? getServoAngle(comp.id) : undefined}
+                      {...extraProps}
                     />
                   </g>
                 );
               })}
+
+              <WireLayer
+                wires={state.wires}
+                components={state.components}
+                selectedId={selectedId}
+                onSelect={setSelectedId}
+                failedWireIds={state.failedWireIds}
+              />
 
             </g>
 
