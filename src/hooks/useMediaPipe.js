@@ -206,14 +206,14 @@ export default function useMediaPipe() {
       addSerialLog('Loading MediaPipe Tasks Vision...', 'info');
 
       let handLandmarker;
-      const hadDefine = 'define' in window;
-      const savedDefine = window.define;
+      let usedDelegate = 'GPU';
       try {
-        delete window.define;
         const vision = await FilesetResolver.forVisionTasks(
           'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm'
         );
-        handLandmarker = await HandLandmarker.createFromOptions(vision, {
+        addSerialLog('WASM fileset resolved, creating hand landmarker...', 'info');
+
+        const modelOpts = {
           baseOptions: {
             modelAssetPath:
               'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task',
@@ -224,12 +224,19 @@ export default function useMediaPipe() {
           minHandDetectionConfidence: 0.4,
           minHandPresenceConfidence: 0.4,
           minTrackingConfidence: 0.4,
-        });
+        };
+
+        try {
+          handLandmarker = await HandLandmarker.createFromOptions(vision, modelOpts);
+        } catch (gpuErr) {
+          addSerialLog(`GPU delegate failed (${gpuErr.message}), falling back to CPU...`, 'warning');
+          usedDelegate = 'CPU';
+          modelOpts.baseOptions.delegate = 'CPU';
+          handLandmarker = await HandLandmarker.createFromOptions(vision, modelOpts);
+        }
       } catch (err) {
         addSerialLog(`ERROR: Failed to load hand landmarker — ${err.message}`, 'error');
         return;
-      } finally {
-        if (hadDefine) window.define = savedDefine;
       }
 
       if (cancelled) {
@@ -238,7 +245,7 @@ export default function useMediaPipe() {
       }
 
       landmarkerRef.current = handLandmarker;
-      addSerialLog('Hand landmarker model loaded (GPU)', 'info');
+      addSerialLog(`Hand landmarker model loaded (${usedDelegate})`, 'info');
 
       let lastTimestamp = -1;
 
