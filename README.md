@@ -2,6 +2,8 @@
 
 browser based IDE for controlling a robotic gripper arm using hand tracking
 
+live demo: https://gripsim.vercel.app/
+
 uses mediapipe to track your hand through the webcam and maps finger movements to servo angles. has a circuit builder where you can wire up an arduino with servos and a breadboard, and a code editor with the python and arduino code
 
 ## how to run
